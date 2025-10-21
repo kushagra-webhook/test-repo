@@ -112,6 +112,42 @@ class User {
   }
 }
 
+// New utility function for array operations
+class ArrayUtils {
+  /**
+   * Chunks an array into smaller arrays of a specified size
+   * @param {Array} array - The array to be chunked
+   * @param {number} size - The size of each chunk
+   * @returns {Array<Array>} - Array of chunks
+   */
+  static chunk(array, size) {
+    if (!Array.isArray(array)) {
+      throw new TypeError('First argument must be an array');
+    }
+    
+    const chunkSize = Math.max(Number(size) || 1, 1);
+    const result = [];
+    
+    for (let i = 0; i < array.length; i += chunkSize) {
+      result.push(array.slice(i, i + chunkSize));
+    }
+    
+    return result;
+  }
+
+  /**
+   * Removes duplicate values from an array
+   * @param {Array} array - The array to process
+   * @returns {Array} - A new array with duplicates removed
+   */
+  static uniq(array) {
+    if (!Array.isArray(array)) {
+      throw new TypeError('Argument must be an array');
+    }
+    return [...new Set(array)];
+  }
+}
+
 // Example usage
 const user = new User(1, 'John Doe', 'john@example.com');
 user.activate();
@@ -142,6 +178,21 @@ const processUser = async () => {
 
 // Run the example
 processUser();
+
+// Test the new ArrayUtils
+const testArrayUtils = () => {
+  console.log('\n--- Testing ArrayUtils ---');
+  
+  // Test chunk
+  const numbers = [1, 2, 3, 4, 5, 6, 7, 8];
+  console.log('Chunk [1-8] into 3s:', ArrayUtils.chunk(numbers, 3));
+  
+  // Test uniq
+  const withDuplicates = [1, 2, 2, 3, 4, 4, 4, 5];
+  console.log('Remove duplicates:', ArrayUtils.uniq(withDuplicates));
+};
+
+testArrayUtils();
 
 // Export for testing
 module.exports = {
