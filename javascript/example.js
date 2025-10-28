@@ -10,6 +10,11 @@ const DEFAULT_TIMEOUT = 5000;
 // Utility functions
 const formatName = (firstName, lastName) => `${firstName} ${lastName}`.trim();
 
+// New utility function to format a date string
+const formatDate = (date = new Date()) => {
+  return date.toISOString().split('T')[0]; // Returns date in YYYY-MM-DD format
+};
+
 const calculateTotal = (items) => {
   if (!Array.isArray(items)) {
     throw new Error('Items must be an array');

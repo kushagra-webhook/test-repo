@@ -71,13 +71,17 @@ def process_file(file_path: str) -> Optional[List[str]]:
 
 def test_webhook():
     """Test function added to verify webhook functionality."""
-    print("Webhook test function added successfully!")
-    return "Webhook test completed"
+    from datetime import datetime
+    print(f"Webhook test executed at: {datetime.now().isoformat()}")
+    return True
 
 
 if __name__ == "__main__":
     # Example usage
     numbers = [1, 2, 3, 4, 5]
+    
+    # Call the test_webhook function when run directly
+    test_webhook()
     processor = DataProcessor(numbers)
     print(f"Original data: {numbers}")
     
