@@ -69,7 +69,124 @@ const withPerformanceTracking = (fn, options = {}) => {
   };
 };
 
-// Simulate API call with retry logic
+// Rate limiter for API calls
+class RateLimiter {
+  constructor(requestsPerSecond) {
+    this.requestsPerSecond = requestsPerSecond;
+    this.queue = [];
+    this.processing = false;
+  }
+
+  async processQueue() {
+    if (this.processing) return;
+    this.processing = true;
+
+    while (this.queue.length > 0) {
+      const now = Date.now();
+      const { timestamp, resolve, endpoint } = this.queue[0];
+      
+      if (now - timestamp >= 1000 / this.requestsPerSecond) {
+        this.queue.shift();
+        resolve(await this.makeApiCall(endpoint));
+      } else {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    }
+    
+    this.processing = false;
+  }
+
+  async makeApiCall(endpoint) {
+    // Simulate API call
+    await new Promise(resolve => setTimeout(resolve, Math.random() * 200 + 100));
+    
+    // Simulate occasional failures (15% chance)
+    if (Math.random() < 0.15) {
+      throw new Error(`API call to ${endpoint} failed`);
+    }
+    
+    return {
+      status: 200,
+      data: {
+        id: Math.random().toString(36).substring(2, 10),
+        endpoint,
+        timestamp: new Date().toISOString(),
+        processedAt: Date.now()
+      }
+    };
+  }
+
+  async call(endpoint) {
+    return new Promise((resolve) => {
+      this.queue.push({
+        timestamp: Date.now(),
+        resolve: (result) => resolve({ success: true, ...result }),
+        endpoint
+      });
+      this.processQueue();
+    }).catch(error => ({
+      success: false,
+      error: error.message,
+      endpoint
+    }));
+  }
+}
+
+// Initialize rate limiter (5 requests per second)
+const apiRateLimiter = new RateLimiter(5);
+
+// Batch processor for multiple API calls
+class BatchProcessor {
+  constructor(batchSize = 5) {
+    this.batchSize = batchSize;
+    this.queue = [];
+    this.results = [];
+    this.processing = false;
+    this.done = null;
+  }
+
+  async processBatch(batch) {
+    const promises = batch.map(({ endpoint, resolve, reject }) => 
+      apiRateLimiter.call(endpoint)
+        .then(result => resolve(result))
+        .catch(error => reject(error))
+    );
+    
+    return Promise.all(promises);
+  }
+
+  async add(endpoint) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ endpoint, resolve, reject });
+      this.processQueue();
+    });
+  }
+
+  async processQueue() {
+    if (this.processing) return;
+    this.processing = true;
+
+    while (this.queue.length > 0) {
+      const batch = this.queue.splice(0, this.batchSize);
+      await this.processBatch(batch);
+    }
+    
+    this.processing = false;
+    if (this.done) this.done();
+  }
+
+  async waitForCompletion() {
+    if (this.queue.length === 0 && !this.processing) {
+      return Promise.resolve();
+    }
+    
+    return new Promise(resolve => {
+      this.done = resolve;
+    });
+  }
+}
+
+// Simulate API call with retry logic and rate limiting
 const simulateApiCall = async (endpoint, options = {}) => {
   const {
     method = 'GET',
@@ -78,37 +195,29 @@ const simulateApiCall = async (endpoint, options = {}) => {
     delay = 1000
   } = options;
   
+  const batchProcessor = new BatchProcessor(3); // Process 3 requests in parallel
+  
   for (let attempt = 1; attempt <= retries + 1; attempt++) {
     try {
-      // Simulate network delay
-      await new Promise(resolve => setTimeout(resolve, Math.random() * 300 + 200));
-      
-      // Simulate occasional failures
-      if (Math.random() < 0.2) {
-        throw new Error('Simulated API failure');
+      const result = await batchProcessor.add(endpoint);
+      if (result.success) {
+        return result;
       }
-      
-      // Return mock response
-      return {
-        status: 200,
-        data: {
-          id: Math.random().toString(36).substring(2, 10),
-          endpoint,
-          method,
-          timestamp: new Date().toISOString(),
-          attempt
-        }
-      };
+      throw new Error(result.error || 'API call failed');
     } catch (error) {
       if (attempt > retries) {
         throw new Error(`API call failed after ${retries + 1} attempts: ${error.message}`);
       }
       
-      // Exponential backoff
-      await new Promise(resolve => setTimeout(resolve, delay * attempt));
+      // Exponential backoff with jitter
+      const backoff = Math.min(delay * Math.pow(2, attempt - 1), 10000);
+      const jitter = Math.random() * 1000;
+      await new Promise(resolve => setTimeout(resolve, backoff + jitter));
     }
   }
-};
+  
+  await batchProcessor.waitForCompletion();
+}
 
 const calculateTotal = (items) => {
   if (!Array.isArray(items)) {
@@ -294,85 +403,267 @@ const testArrayUtils = () => {
 
 testArrayUtils();
 
-// Enhanced webhook test with API simulation and comprehensive reporting
+// Enhanced webhook test with advanced features
 const runWebhookTest = withPerformanceTracking(async () => {
   const testId = `test_${generateRandomString(8)}`;
   const testStart = new Date().toISOString();
   
-  console.log(`\n` + '='.repeat(60));
-  console.log(`🚀 WEBHOOK TEST #4 - ${testId}`.padEnd(58) + '🚀');
-  console.log('='.repeat(60));
+  console.log(`\n` + '='.repeat(70));
+  console.log(`🚀 WEBHOOK TEST #5 - ${testId}`.padEnd(68) + '🚀');
+  console.log('='.repeat(70));
   
   // Test configuration
   const config = {
-    testRuns: 3,
+    testRuns: 5,  // Increased test runs for better metrics
     apiEndpoints: [
       '/api/users',
+      '/api/users/active',
       '/api/products',
-      '/api/orders'
+      '/api/products/popular',
+      '/api/orders',
+      '/api/orders/recent',
+      '/api/inventory',
+      '/api/analytics'
     ],
-    concurrency: 2
+    concurrency: 3,  // Process 3 requests in parallel
+    rateLimit: 5,    // 5 requests per second
+    timeout: 10000,  // 10 second timeout per request
+    retryPolicy: {
+      maxRetries: 3,
+      initialDelay: 1000,
+      maxDelay: 10000
+    }
   };
   
-  // Run tests
+  // Initialize test environment
+  console.log('\n🔧 Test Configuration:');
+  console.log(`   Test Runs: ${config.testRuns}`);
+  console.log(`   Endpoints: ${config.apiEndpoints.join(', ')}`);
+  console.log(`   Concurrency: ${config.concurrency} parallel requests`);
+  console.log(`   Rate Limit: ${config.rateLimit} requests/second`);
+  console.log(`   Timeout: ${config.timeout}ms per request`);
+  console.log(`   Retry Policy: ${config.retryPolicy.maxRetries} retries`);
+  console.log('='.repeat(70));
+  
+  // Initialize test results with enhanced metrics
   const results = {
     totalTests: 0,
     passed: 0,
     failed: 0,
     totalDuration: 0,
-    apiCalls: []
+    apiCalls: [],
+    endpointStats: {},
+    responseTimes: [],
+    errors: [],
+    retries: 0,
+    rateLimited: 0,
+    timeouts: 0,
+    startTime: performance.now(),
+    testRuns: []
   };
   
-  // Run multiple test cases
+  // Initialize endpoint statistics
+  config.apiEndpoints.forEach(endpoint => {
+    results.endpointStats[endpoint] = {
+      calls: 0,
+      successes: 0,
+      failures: 0,
+      totalResponseTime: 0,
+      minResponseTime: Infinity,
+      maxResponseTime: 0,
+      lastError: null
+    };
+  });
+  
+  // Run multiple test cases with enhanced error handling
   for (let i = 0; i < config.testRuns; i++) {
     const runStart = performance.now();
     const runId = i + 1;
     
-    console.log(`\n🔹 Test Run #${runId} - Starting...`);
+    console.log(`\n🔹 Test Run #${runId} - Starting (${i + 1}/${config.testRuns})...`);
     
-    // Test each API endpoint
-    const apiPromises = config.apiEndpoints.map(async (endpoint) => {
-      try {
-        const response = await simulateApiCall(endpoint, {
-          method: 'GET',
-          retries: 1
-        });
-        
-        results.apiCalls.push({
-          endpoint,
-          status: 'success',
-          attempt: response.data.attempt,
-          timestamp: response.data.timestamp
-        });
-        
-        return { success: true, endpoint };
-      } catch (error) {
-        results.apiCalls.push({
-          endpoint,
-          status: 'failed',
-          error: error.message,
-          timestamp: new Date().toISOString()
-        });
-        
-        return { success: false, endpoint, error };
-      }
-    });
+    // Process endpoints in batches for better control
+    const batchSize = config.concurrency;
+    const endpointBatches = [];
     
-    // Process results
-    const runResults = await Promise.all(apiPromises);
+    for (let j = 0; j < config.apiEndpoints.length; j += batchSize) {
+      endpointBatches.push(config.apiEndpoints.slice(j, j + batchSize));
+    }
+    
+    const runResults = [];
+    
+    // Process each batch
+    for (const [batchIndex, batch] of endpointBatches.entries()) {
+      const batchStart = performance.now();
+      console.log(`   Batch ${batchIndex + 1}/${endpointBatches.length}: Testing ${batch.join(', ')}`);
+      
+      const batchPromises = batch.map(async (endpoint) => {
+        const callStart = performance.now();
+        let attempts = 0;
+        let lastError = null;
+        
+        // Initialize endpoint stats if not exists
+        if (!results.endpointStats[endpoint]) {
+          results.endpointStats[endpoint] = {
+            calls: 0,
+            successes: 0,
+            failures: 0,
+            totalResponseTime: 0,
+            minResponseTime: Infinity,
+            maxResponseTime: 0,
+            lastError: null
+          };
+        }
+        
+        // Update endpoint call count
+        results.endpointStats[endpoint].calls++;
+        results.totalTests++;
+        
+        // Simulate API call with retries
+        while (attempts <= config.retryPolicy.maxRetries) {
+          attempts++;
+          
+          try {
+            // Apply rate limiting
+            if (results.apiCalls.length > 0 && 
+                results.apiCalls.length % config.rateLimit === 0) {
+              //console.log(`   ⏳ Rate limiting (${config.rateLimit} req/s)...`);
+              results.rateLimited++;
+              await new Promise(resolve => setTimeout(resolve, 1000 / config.rateLimit));
+            }
+            
+            // Simulate API call with timeout
+            const apiPromise = simulateApiCall(endpoint, {
+              method: 'GET',
+              retries: 0, // We handle retries manually
+              timeout: config.timeout
+            });
+            
+            // Add timeout handling
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Request timeout')), config.timeout)
+            );
+            
+            const response = await Promise.race([apiPromise, timeoutPromise]);
+            const responseTime = performance.now() - callStart;
+            
+            // Update response time metrics
+            results.responseTimes.push(responseTime);
+            results.endpointStats[endpoint].totalResponseTime += responseTime;
+            results.endpointStats[endpoint].minResponseTime = 
+              Math.min(results.endpointStats[endpoint].minResponseTime, responseTime);
+            results.endpointStats[endpoint].maxResponseTime = 
+              Math.max(results.endpointStats[endpoint].maxResponseTime, responseTime);
+            
+            // Record successful call
+            results.endpointStats[endpoint].successes++;
+            results.passed++;
+            
+            results.apiCalls.push({
+              endpoint,
+              status: 'success',
+              responseTime,
+              timestamp: new Date().toISOString(),
+              attempt: attempts,
+              runId
+            });
+            
+            return { 
+              success: true, 
+              endpoint, 
+              responseTime,
+              attempts
+            };
+            
+          } catch (error) {
+            lastError = error;
+            results.errors.push({
+              endpoint,
+              error: error.message,
+              timestamp: new Date().toISOString(),
+              attempt: attempts,
+              runId
+            });
+            
+            if (error.message.includes('timeout')) {
+              results.timeouts++;
+            }
+            
+            // If we've reached max retries, record the failure
+            if (attempts > config.retryPolicy.maxRetries) {
+              results.endpointStats[endpoint].failures++;
+              results.failed++;
+              results.endpointStats[endpoint].lastError = error.message;
+              
+              results.apiCalls.push({
+                endpoint,
+                status: 'failed',
+                error: error.message,
+                timestamp: new Date().toISOString(),
+                attempt: attempts,
+                runId
+              });
+              
+              return { 
+                success: false, 
+                endpoint, 
+                error: error.message,
+                attempts
+              };
+            }
+            
+            // Exponential backoff with jitter
+            const backoff = Math.min(
+              config.retryPolicy.initialDelay * Math.pow(2, attempts - 1),
+              config.retryPolicy.maxDelay
+            );
+            const jitter = Math.random() * 500; // Add up to 500ms jitter
+            await new Promise(resolve => setTimeout(resolve, backoff + jitter));
+            results.retries++;
+          }
+        }
+      });
+      
+      // Wait for batch to complete
+      const batchResults = await Promise.all(batchPromises);
+      runResults.push(...batchResults);
+      
+      const batchDuration = (performance.now() - batchStart) / 1000;
+      console.log(`   Batch ${batchIndex + 1} completed in ${batchDuration.toFixed(2)}s`);
+    }
+    
     const runDuration = (performance.now() - runStart) / 1000;
-    
-    // Update statistics
-    results.totalTests += config.apiEndpoints.length;
-    results.passed += runResults.filter(r => r.success).length;
-    results.failed += runResults.filter(r => !r.success).length;
     results.totalDuration += runDuration;
     
-    console.log(`   ✅ ${runResults.filter(r => r.success).length} passed`);
-    if (results.failed > 0) {
-      console.log(`   ❌ ${runResults.filter(r => !r.success).length} failed`);
+    // Calculate run statistics
+    const runStats = {
+      runId,
+      startTime: new Date().toISOString(),
+      duration: runDuration,
+      totalCalls: runResults.length,
+      successfulCalls: runResults.filter(r => r.success).length,
+      failedCalls: runResults.filter(r => !r.success).length,
+      successRate: (runResults.filter(r => r.success).length / runResults.length * 100).toFixed(2) + '%',
+      avgResponseTime: runResults.reduce((sum, r) => sum + (r.responseTime || 0), 0) / runResults.length,
+      endpointsTested: [...new Set(runResults.map(r => r.endpoint))].length
+    };
+    
+    results.testRuns.push(runStats);
+    
+    // Print run summary
+    console.log(`\n📊 Run #${runId} Summary:`);
+    console.log(`   ✅ ${runStats.successfulCalls} passed`);
+    if (runStats.failedCalls > 0) {
+      console.log(`   ❌ ${runStats.failedCalls} failed`);
     }
     console.log(`   ⏱️  Duration: ${runDuration.toFixed(2)}s`);
+    console.log(`   📈 Success Rate: ${runStats.successRate}`);
+    console.log(`   🚀 Avg. Response: ${runStats.avgResponseTime.toFixed(2)}ms`);
+    
+    // If not the last run, add a small delay between runs
+    if (i < config.testRuns - 1) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
   }
   
   // Calculate success rate
