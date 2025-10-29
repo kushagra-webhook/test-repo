@@ -25,6 +25,20 @@ const generateRandomString = (length = 8) => {
   return result;
 };
 
+// Performance tracking utility
+const withPerformanceTracking = (fn) => {
+  return (...args) => {
+    const start = performance.now();
+    const result = fn(...args);
+    const end = performance.now();
+    return {
+      result,
+      executionTime: end - start,
+      timestamp: new Date().toISOString()
+    };
+  };
+};
+
 const calculateTotal = (items) => {
   if (!Array.isArray(items)) {
     throw new Error('Items must be an array');
@@ -209,10 +223,42 @@ const testArrayUtils = () => {
 
 testArrayUtils();
 
-// Log the current date and a random string for webhook testing
-const randomId = generateRandomString(6);
-console.log(`Webhook test #2 - Timestamp: ${new Date().toISOString()}`);
-console.log(`Test ID: ${randomId}`);
+// Enhanced webhook test with performance tracking
+const runWebhookTest = () => {
+  const testId = `test_${generateRandomString(6)}`;
+  const startTime = performance.now();
+  
+  // Simulate some processing
+  const testData = Array(1000).fill().map((_, i) => ({
+    id: i,
+    value: Math.random() * 1000,
+    timestamp: new Date().toISOString()
+  }));
+  
+  const endTime = performance.now();
+  
+  console.log(`\n=== Webhook Test #3 ===`);
+  console.log(`Test ID: ${testId}`);
+  console.log(`Start Time: ${new Date(startTime).toISOString()}`);
+  console.log(`End Time: ${new Date(endTime).toISOString()}`);
+  console.log(`Duration: ${(endTime - startTime).toFixed(2)}ms`);
+  console.log(`Items Processed: ${testData.length}`);
+  console.log(`Test Status: COMPLETED`);
+  console.log(`Test Version: 3.0.0`);
+  
+  return {
+    testId,
+    startTime: new Date(startTime).toISOString(),
+    endTime: new Date(endTime).toISOString(),
+    duration: endTime - startTime,
+    itemsProcessed: testData.length,
+    status: 'completed',
+    version: '3.0.0'
+  };
+};
+
+// Execute the test
+const testResult = runWebhookTest();
 
 // Export for testing
 module.exports = {
