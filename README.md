@@ -27,3 +27,33 @@ test-repo/
 1. Push this repository to GitHub
 2. Set up a webhook to your local Code Quality Automation server
 3. Make changes to test different scenarios
+
+## JavaScript Development Setup
+
+### ESLint Configuration
+
+To set up ESLint for this project, run the following commands in the project root:
+
+```bash
+# Initialize npm if not already done
+npm init -y
+
+# Install ESLint as a dev dependency
+npm i -D eslint
+
+# Initialize ESLint configuration
+npx eslint --init
+```
+
+### Alternative Global Installation
+
+For a quick setup without modifying the project (not recommended for team projects):
+
+```bash
+# Install ESLint globally
+npm i -g eslint
+```
+
+### Project Structure
+
+The JavaScript code is located in the `javascript/` directory. The ESLint configuration will be created in the project root.

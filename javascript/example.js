@@ -403,8 +403,73 @@ const testArrayUtils = () => {
 
 testArrayUtils();
 
-// Enhanced webhook test with advanced features
+// Enhanced webhook test with advanced features including circuit breaker and distributed tracing
 const runWebhookTest = withPerformanceTracking(async () => {
+  // Feature flag for enabling/disabling circuit breaker
+  const CIRCUIT_BREAKER_ENABLED = true;
+  const CIRCUIT_BREAKER_THRESHOLD = 5; // Number of failures before opening circuit
+  const CIRCUIT_BREAKER_RESET_TIMEOUT = 30000; // 30 seconds
+  
+  // Distributed tracing
+  const traceId = `trace_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
+  // Circuit breaker state
+  const circuitBreaker = {
+    isOpen: false,
+    failureCount: 0,
+    lastFailure: null,
+    
+    async execute(requestFn) {
+      if (this.isOpen) {
+        const timeSinceLastFailure = Date.now() - this.lastFailure;
+        if (timeSinceLastFailure > CIRCUIT_BREAKER_RESET_TIMEOUT) {
+          this.isOpen = false;
+          logger.info(`Circuit breaker reset after ${timeSinceLastFailure}ms`, { traceId });
+        } else {
+          throw new Error(`Circuit breaker is open. Too many failures. Auto-reset in ${Math.ceil((CIRCUIT_BREAKER_RESET_TIMEOUT - timeSinceLastFailure) / 1000)}s`);
+        }
+      }
+      
+      try {
+        const result = await requestFn();
+        this.recordSuccess();
+        return result;
+      } catch (error) {
+        this.recordFailure();
+        throw error;
+      }
+    },
+    
+    recordFailure() {
+      if (!CIRCUIT_BREAKER_ENABLED) return;
+      
+      this.failureCount++;
+      this.lastFailure = Date.now();
+      
+      if (this.failureCount >= CIRCUIT_BREAKER_THRESHOLD) {
+        this.isOpen = true;
+        logger.error('Circuit breaker tripped!', { 
+          traceId,
+          failureCount: this.failureCount,
+          lastFailure: new Date(this.lastFailure).toISOString()
+        });
+        
+        // Auto-reset after timeout
+        setTimeout(() => {
+          this.isOpen = false;
+          this.failureCount = 0;
+          logger.info('Circuit breaker reset after timeout', { traceId });
+        }, CIRCUIT_BREAKER_RESET_TIMEOUT);
+      }
+    },
+    
+    recordSuccess() {
+      if (this.failureCount > 0) {
+        this.failureCount = 0;
+        logger.info('Request succeeded, resetting failure count', { traceId });
+      }
+    }
+  };
   const testId = `test_${generateRandomString(8)}`;
   const testStart = new Date().toISOString();
   
@@ -445,8 +510,10 @@ const runWebhookTest = withPerformanceTracking(async () => {
   console.log(`   Retry Policy: ${config.retryPolicy.maxRetries} retries`);
   console.log('='.repeat(70));
   
-  // Initialize test results with enhanced metrics
+  // Initialize test results with enhanced metrics and distributed tracing
   const results = {
+    testId: `test_${Date.now()}`,
+    traceId,
     totalTests: 0,
     passed: 0,
     failed: 0,
@@ -458,8 +525,57 @@ const runWebhookTest = withPerformanceTracking(async () => {
     retries: 0,
     rateLimited: 0,
     timeouts: 0,
+    circuitBreakerTrips: 0,
     startTime: performance.now(),
-    testRuns: []
+    testRuns: [],
+    metadata: {
+      environment: process.env.NODE_ENV || 'development',
+      hostname: require('os').hostname(),
+      nodeVersion: process.version,
+      platform: process.platform,
+      architecture: process.arch,
+      cpuCount: require('os').cpus().length,
+      memory: process.memoryUsage(),
+      commandLineArgs: process.argv,
+      environmentVariables: Object.keys(process.env).filter(k => 
+        k.startsWith('NODE_') || 
+        k.startsWith('WEBHOOK_') || 
+        k === 'DEBUG' || 
+        k === 'CI'
+      ).reduce((acc, k) => ({ ...acc, [k]: process.env[k] }), {})
+    },
+    // Add correlation IDs for distributed tracing
+    correlationIds: {
+      sessionId: `sess_${Math.random().toString(36).substr(2, 9)}`,
+      requestId: `req_${Math.random().toString(36).substr(2, 9)}`,
+      parentSpanId: `span_${Math.random().toString(36).substr(2, 9)}`,
+      traceFlags: '01' // Sampled flag
+    },
+    // Add performance budget tracking
+    performanceBudget: {
+      maxResponseTime: 1000, // ms
+      errorRateThreshold: 0.05, // 5%
+      maxConcurrentRequests: config.concurrency || 10,
+      budgetConsumed: 0,
+      isWithinBudget: true,
+      checkBudget() {
+        const errorRate = this.totalTests > 0 ? this.failed / this.totalTests : 0;
+        const avgResponseTime = this.responseTimes.length > 0 
+          ? this.responseTimes.reduce((a, b) => a + b, 0) / this.responseTimes.length 
+          : 0;
+          
+        const isErrorRateOk = errorRate <= this.errorRateThreshold;
+        const isResponseTimeOk = avgResponseTime <= this.maxResponseTime;
+        
+        this.isWithinBudget = isErrorRateOk && isResponseTimeOk;
+        this.budgetConsumed = Math.max(
+          errorRate / this.errorRateThreshold,
+          avgResponseTime / this.maxResponseTime
+        ) * 100;
+        
+        return this.isWithinBudget;
+      }
+    }
   };
   
   // Initialize endpoint statistics
@@ -524,36 +640,67 @@ const runWebhookTest = withPerformanceTracking(async () => {
           attempts++;
           
           try {
-            // Apply rate limiting
-            if (results.apiCalls.length > 0 && 
-                results.apiCalls.length % config.rateLimit === 0) {
-              //console.log(`   ⏳ Rate limiting (${config.rateLimit} req/s)...`);
-              results.rateLimited++;
-              await new Promise(resolve => setTimeout(resolve, 1000 / config.rateLimit));
-            }
+            // Apply rate limiting with adaptive throttling
+            const currentTime = Date.now();
+            const lastMinuteCalls = results.apiCalls.filter(call => 
+              currentTime - new Date(call.timestamp).getTime() < 60000
+            ).length;
             
-            // Simulate API call with timeout
-            const apiPromise = simulateApiCall(endpoint, {
-              method: 'GET',
-              retries: 0, // We handle retries manually
-              timeout: config.timeout
-            });
-            
-            // Add timeout handling
-            const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Request timeout')), config.timeout)
+            const requestsPerMinute = config.rateLimit * 60;
+            const adaptiveRateLimit = Math.max(
+              config.rateLimit * 0.5, // Never go below 50% of target rate
+              config.rateLimit - Math.floor(lastMinuteCalls / 60) // Reduce rate as we approach limit
             );
             
-            const response = await Promise.race([apiPromise, timeoutPromise]);
-            const responseTime = performance.now() - callStart;
+            if (results.apiCalls.length > 0 && 
+                results.apiCalls.length % Math.ceil(1000 / adaptiveRateLimit) === 0) {
+              results.rateLimited++;
+              
+              // Add jitter to prevent thundering herd
+              const jitter = Math.random() * 200 - 100; // ±100ms
+              await new Promise(resolve => setTimeout(resolve, (1000 / adaptiveRateLimit) + jitter));
+            }
+            
+            // Generate a unique span ID for distributed tracing
+            const spanId = `span_${Math.random().toString(36).substr(2, 9)}`;
+            const startTime = process.hrtime.bigint();
+            
+            // Execute with circuit breaker
+            const response = await circuitBreaker.execute(async () => {
+              // Simulate API call with timeout
+              const apiPromise = simulateApiCall(endpoint, {
+                method: 'GET',
+                retries: 0, // We handle retries manually
+                timeout: config.timeout,
+                headers: {
+                  'X-Request-ID': `req_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+                  'X-Correlation-ID': results.correlationIds.sessionId,
+                  'X-Trace-ID': traceId,
+                  'X-Span-ID': spanId,
+                  'X-Parent-Span-ID': results.correlationIds.parentSpanId
+                }
+              });
+              
+              // Add timeout handling
+              const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Request timeout')), config.timeout)
+              );
+              
+              return await Promise.race([apiPromise, timeoutPromise]);
+            });
+            
+            // Record successful request
+            const endTime = process.hrtime.bigint();
+            const durationNs = endTime - startTime;
+            const durationMs = Number(durationNs) / 1e6; // Convert to milliseconds
             
             // Update response time metrics
-            results.responseTimes.push(responseTime);
-            results.endpointStats[endpoint].totalResponseTime += responseTime;
+            results.responseTimes.push(durationMs);
+            results.endpointStats[endpoint].totalResponseTime += durationMs;
             results.endpointStats[endpoint].minResponseTime = 
-              Math.min(results.endpointStats[endpoint].minResponseTime, responseTime);
+              Math.min(results.endpointStats[endpoint].minResponseTime, durationMs);
             results.endpointStats[endpoint].maxResponseTime = 
-              Math.max(results.endpointStats[endpoint].maxResponseTime, responseTime);
+              Math.max(results.endpointStats[endpoint].maxResponseTime, durationMs);
             
             // Record successful call
             results.endpointStats[endpoint].successes++;
@@ -562,38 +709,64 @@ const runWebhookTest = withPerformanceTracking(async () => {
             results.apiCalls.push({
               endpoint,
               status: 'success',
-              responseTime,
+              responseTime: durationMs,
               timestamp: new Date().toISOString(),
               attempt: attempts,
-              runId
+              runId,
+              traceContext: {
+                traceId,
+                spanId,
+                parentSpanId: results.correlationIds.parentSpanId,
+                sampled: true,
+                flags: 1
+              }
             });
             
             return { 
               success: true, 
               endpoint, 
-              responseTime,
+              responseTime: durationMs,
               attempts
             };
             
-          } catch (error) {
+} catch (error) {
             lastError = error;
-            results.errors.push({
+            const errorEntry = {
               endpoint,
               error: error.message,
+              errorType: error.constructor.name,
+              stack: error.stack,
               timestamp: new Date().toISOString(),
               attempt: attempts,
-              runId
-            });
+              runId,
+              traceId,
+              isCircuitBreakerOpen: circuitBreaker.isOpen,
+              failureCount: circuitBreaker.failureCount,
+              lastFailure: circuitBreaker.lastFailure ? new Date(circuitBreaker.lastFailure).toISOString() : null
+            };
+            
+            results.errors.push(errorEntry);
+            
+            // Log detailed error information
+            logger.error(`Request failed: ${error.message}`, errorEntry);
             
             if (error.message.includes('timeout')) {
               results.timeouts++;
+            } else if (error.message.includes('Circuit breaker')) {
+              results.circuitBreakerTrips++;
+              logger.warn('Circuit breaker tripped during request', {
+                endpoint,
+                attempt: attempts,
+                traceId,
+                isOpen: circuitBreaker.isOpen,
+                failureCount: circuitBreaker.failureCount
+              });
             }
             
             // If we've reached max retries, record the failure
             if (attempts > config.retryPolicy.maxRetries) {
               results.endpointStats[endpoint].failures++;
               results.failed++;
-              results.endpointStats[endpoint].lastError = error.message;
               
               results.apiCalls.push({
                 endpoint,
@@ -601,7 +774,14 @@ const runWebhookTest = withPerformanceTracking(async () => {
                 error: error.message,
                 timestamp: new Date().toISOString(),
                 attempt: attempts,
-                runId
+                runId,
+                traceContext: {
+                  traceId,
+                  spanId: `span_${Math.random().toString(36).substr(2, 9)}`,
+                  parentSpanId: results.correlationIds.parentSpanId,
+                  sampled: true,
+                  flags: 1
+                }
               });
               
               return { 
@@ -641,24 +821,105 @@ const runWebhookTest = withPerformanceTracking(async () => {
       startTime: new Date().toISOString(),
       duration: runDuration,
       totalCalls: runResults.length,
-      successfulCalls: runResults.filter(r => r.success).length,
-      failedCalls: runResults.filter(r => !r.success).length,
-      successRate: (runResults.filter(r => r.success).length / runResults.length * 100).toFixed(2) + '%',
-      avgResponseTime: runResults.reduce((sum, r) => sum + (r.responseTime || 0), 0) / runResults.length,
-      endpointsTested: [...new Set(runResults.map(r => r.endpoint))].length
+      successfulCalls: runResults.filter(r => r && r.success).length,
+      failedCalls: runResults.filter(r => r && !r.success).length,
+      successRate: runResults.length > 0 
+        ? (runResults.filter(r => r.success).length / runResults.length * 100).toFixed(2) + '%'
+        : '0%',
+      avgResponseTime: runResults.length > 0 
+        ? runResults.reduce((sum, r) => sum + (r.responseTime || 0), 0) / runResults.length
+        : 0,
+      endpointsTested: [...new Set(runResults.filter(r => r).map(r => r.endpoint))].length
     };
     
     results.testRuns.push(runStats);
     
-    // Print run summary
-    console.log(`\n📊 Run #${runId} Summary:`);
-    console.log(`   ✅ ${runStats.successfulCalls} passed`);
-    if (runStats.failedCalls > 0) {
-      console.log(`   ❌ ${runStats.failedCalls} failed`);
+    // Generate and print run summary with enhanced metrics
+    const successRate = runStats.totalCalls > 0 
+      ? (runStats.successfulCalls / runStats.totalCalls * 100).toFixed(2) 
+      : 0;
+      
+    const errorRate = runStats.totalCalls > 0
+      ? ((runStats.failedCalls || 0) / runStats.totalCalls * 100).toFixed(2)
+      : 0;
+      
+    const throughput = runDuration > 0 
+      ? (runStats.totalCalls / runDuration).toFixed(2) 
+      : 0;
+    
+    // Calculate p90 and p99 response times
+    const sortedResponseTimes = [...results.responseTimes].sort((a, b) => a - b);
+    const p90Index = Math.floor(sortedResponseTimes.length * 0.9);
+    const p99Index = Math.floor(sortedResponseTimes.length * 0.99);
+    const p90 = sortedResponseTimes[p90Index]?.toFixed(2) || 'N/A';
+    const p99 = sortedResponseTimes[p99Index]?.toFixed(2) || 'N/A';
+    
+    // Check performance budget
+    const isWithinBudget = results.performanceBudget.checkBudget();
+    const budgetStatus = isWithinBudget ? '✅ Within budget' : '⚠️  Over budget';
+    
+    // Print enhanced summary
+    console.log(`\n📊 Run #${runId} Summary (${results.testId})`);
+    console.log('='.repeat(80));
+    console.log('🔹 Test Results:');
+    console.log(`   ✅ Passed:     ${runStats.successfulCalls}`);
+    console.log(`   ❌ Failed:     ${runStats.failedCalls || 0}`);
+    console.log(`   🔄 Retries:    ${results.retries}`);
+    console.log(`   ⚡ Timeouts:   ${results.timeouts}`);
+    console.log(`   🔌 CB Trips:   ${results.circuitBreakerTrips}`);
+    console.log('\n📈 Performance Metrics:');
+    console.log(`   ⏱️  Duration:   ${runDuration.toFixed(2)}s`);
+    console.log(`   📊 Success:    ${successRate}%`);
+    console.log(`   📉 Error Rate: ${errorRate}%`);
+    console.log(`   🚀 Throughput: ${throughput} req/s`);
+    console.log(`   🐇 Avg. Time:  ${runStats.avgResponseTime?.toFixed(2) || 0}ms`);
+    console.log(`   📊 p90:        ${p90}ms`);
+    console.log(`   📈 p99:        ${p99}ms`);
+    console.log(`   💰 Budget:     ${budgetStatus} (${results.performanceBudget.budgetConsumed.toFixed(1)}% used)`);
+    
+    // Print circuit breaker status
+    if (circuitBreaker.isOpen) {
+      const timeUntilReset = Math.ceil(
+        (circuitBreaker.lastFailure + CIRCUIT_BREAKER_RESET_TIMEOUT - Date.now()) / 1000
+      );
+      console.log(`\n⚠️  Circuit Breaker: OPEN (auto-reset in ${timeUntilReset}s)`);
+    } else {
+      console.log(`\n✅ Circuit Breaker: CLOSED (${circuitBreaker.failureCount}/${CIRCUIT_BREAKER_THRESHOLD} failures)`);
     }
-    console.log(`   ⏱️  Duration: ${runDuration.toFixed(2)}s`);
-    console.log(`   📈 Success Rate: ${runStats.successRate}`);
-    console.log(`   🚀 Avg. Response: ${runStats.avgResponseTime.toFixed(2)}ms`);
+    
+    // Print trace information
+    console.log('\n🔍 Trace Information:');
+    console.log(`   Trace ID:       ${traceId}`);
+    console.log(`   Session ID:     ${results.correlationIds.sessionId}`);
+    console.log(`   Environment:    ${results.metadata.environment}`);
+    console.log(`   Host:           ${results.metadata.hostname}`);
+    console.log('='.repeat(80));
+    
+    // Log detailed metrics
+    logger.log(LogLevel.INFO, 'Test run completed', {
+      runId,
+      traceId,
+      duration: runDuration,
+      successRate,
+      errorRate,
+      throughput,
+      avgResponseTime: runStats.avgResponseTime,
+      p90,
+      p99,
+      isWithinBudget,
+      budgetConsumed: results.performanceBudget.budgetConsumed,
+      circuitBreaker: {
+        isOpen: circuitBreaker.isOpen,
+        failureCount: circuitBreaker.failureCount,
+        lastFailure: circuitBreaker.lastFailure 
+          ? new Date(circuitBreaker.lastFailure).toISOString() 
+          : null
+      },
+      resourceUsage: {
+        memory: process.memoryUsage(),
+        cpu: process.cpuUsage()
+      }
+    });
     
     // If not the last run, add a small delay between runs
     if (i < config.testRuns - 1) {
@@ -672,8 +933,8 @@ const runWebhookTest = withPerformanceTracking(async () => {
   
   // Generate report
   const report = {
-    testId,
-    version: '4.0.0',
+    testId: results.testId,
+    version: '5.0.0',
     timestamp: testStart,
     duration: results.totalDuration,
     stats: {
@@ -682,26 +943,40 @@ const runWebhookTest = withPerformanceTracking(async () => {
       failed: results.failed,
       successRate: parseFloat(successRate.toFixed(2)),
       avgDuration: parseFloat(avgDuration.toFixed(2)),
-      apiCalls: results.apiCalls
+      apiCalls: results.apiCalls,
+      circuitBreakerTrips: results.circuitBreakerTrips,
+      timeouts: results.timeouts,
+      retries: results.retries
     },
     environment: {
       nodeVersion: process.version,
       platform: process.platform,
       memory: process.memoryUsage(),
-      cpuUsage: process.cpuUsage()
+      cpuUsage: process.cpuUsage(),
+      traceId: traceId,
+      correlationIds: results.correlationIds
+    },
+    metadata: results.metadata,
+    performanceBudget: {
+      isWithinBudget: results.performanceBudget.isWithinBudget,
+      budgetConsumed: results.performanceBudget.budgetConsumed
     }
   };
   
   // Print summary
-  console.log('\n' + '='.repeat(60));
-  console.log('📊 TEST SUMMARY'.padEnd(58) + '📊');
-  console.log('='.repeat(60));
-  console.log(`Total Tests:  ${report.stats.totalTests}`);
+  console.log('\n' + '='.repeat(80));
+  console.log('📊 TEST SUMMARY'.padEnd(78) + '📊');
+  console.log('='.repeat(80));
+  console.log(`Test ID:       ${report.testId}`);
+  console.log(`Total Tests:   ${report.stats.totalTests}`);
   console.log(`✅ Passed:     ${report.stats.passed}`);
   console.log(`❌ Failed:     ${report.stats.failed}`);
   console.log(`📈 Success:    ${report.stats.successRate}%`);
   console.log(`⏱️  Avg. Time:  ${report.stats.avgDuration.toFixed(2)}s`);
-  console.log('='.repeat(60));
+  console.log(`🔄 Retries:    ${report.stats.retries}`);
+  console.log(`⚡ Timeouts:   ${report.stats.timeouts}`);
+  console.log(`🔌 CB Trips:   ${report.stats.circuitBreakerTrips}`);
+  console.log('='.repeat(80));
   
   return report;
 }, { includeStackTrace: true });
@@ -713,5 +988,7 @@ const testResult = runWebhookTest();
 module.exports = {
   User,
   formatDate,
-  calculateTotal
+  calculateTotal,
+  runWebhookTest,
+  withPerformanceTracking
 };
