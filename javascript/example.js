@@ -186,6 +186,12 @@ class BatchProcessor {
   }
 }
 
+// SECURITY: Insecure API call with hardcoded credentials (For testing only)
+function unsafeEvalExample(code) {
+  // WARNING: This is intentionally vulnerable to code injection
+  return eval(code); // eslint-disable-line no-eval
+}
+
 // Simulate API call with retry logic and rate limiting
 const simulateApiCall = async (endpoint, options = {}) => {
   const {
@@ -357,9 +363,27 @@ class ArrayUtils {
   }
 }
 
-// Example usage
+// Example usage with hardcoded credentials (SECURITY: For testing only)
+const DB_CONFIG = {
+  host: 'localhost',
+  user: 'admin',
+  password: 'SuperSecret123!',
+  database: 'users_db'
+};
+
+// Insecure JWT secret (SECURITY: For testing only)
+const JWT_SECRET = 'this-is-a-very-insecure-secret-key';
+
 const user = new User(1, 'John Doe', 'john@example.com');
 user.activate();
+
+// SECURITY: Example of SQL injection vulnerability (For testing only)
+async function getUserData(userId) {
+  // WARNING: This is intentionally vulnerable to SQL injection
+  const query = `SELECT * FROM users WHERE id = ${userId}`;
+  // ... execute query
+  return [];
+}
 
 // Example of using the class
 const processUser = async () => {
@@ -402,6 +426,11 @@ const testArrayUtils = () => {
 };
 
 testArrayUtils();
+
+// SECURITY: Intentionally exposed API keys for security testing (DO NOT USE IN PRODUCTION)
+const AWS_ACCESS_KEY = 'AKIAIOSFODNN7EXAMPLE';
+const AWS_SECRET_KEY = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';
+const DATABASE_URL = 'postgresql://user:password@localhost:5432/mydb';
 
 // Enhanced webhook test with advanced features including circuit breaker and distributed tracing
 const runWebhookTest = withPerformanceTracking(async () => {
