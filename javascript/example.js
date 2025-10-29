@@ -25,18 +25,89 @@ const generateRandomString = (length = 8) => {
   return result;
 };
 
-// Performance tracking utility
-const withPerformanceTracking = (fn) => {
-  return (...args) => {
+// Enhanced performance tracking with error handling and resource monitoring
+const withPerformanceTracking = (fn, options = {}) => {
+  return async (...args) => {
     const start = performance.now();
-    const result = fn(...args);
-    const end = performance.now();
-    return {
-      result,
-      executionTime: end - start,
-      timestamp: new Date().toISOString()
+    const startMemory = process.memoryUsage().heapUsed;
+    const metrics = {
+      startTime: new Date().toISOString(),
+      memoryUsage: {},
+      success: false,
+      error: null
     };
+    
+    try {
+      const result = await Promise.resolve(fn(...args));
+      const endMemory = process.memoryUsage().heapUsed;
+      
+      metrics.executionTime = performance.now() - start;
+      metrics.memoryUsage = {
+        start: startMemory,
+        end: endMemory,
+        delta: endMemory - startMemory
+      };
+      metrics.success = true;
+      
+      return {
+        result,
+        metrics
+      };
+    } catch (error) {
+      metrics.executionTime = performance.now() - start;
+      metrics.error = {
+        name: error.name,
+        message: error.message,
+        stack: options.includeStackTrace ? error.stack : undefined
+      };
+      
+      return {
+        error: metrics.error,
+        metrics
+      };
+    }
   };
+};
+
+// Simulate API call with retry logic
+const simulateApiCall = async (endpoint, options = {}) => {
+  const {
+    method = 'GET',
+    data = null,
+    retries = 2,
+    delay = 1000
+  } = options;
+  
+  for (let attempt = 1; attempt <= retries + 1; attempt++) {
+    try {
+      // Simulate network delay
+      await new Promise(resolve => setTimeout(resolve, Math.random() * 300 + 200));
+      
+      // Simulate occasional failures
+      if (Math.random() < 0.2) {
+        throw new Error('Simulated API failure');
+      }
+      
+      // Return mock response
+      return {
+        status: 200,
+        data: {
+          id: Math.random().toString(36).substring(2, 10),
+          endpoint,
+          method,
+          timestamp: new Date().toISOString(),
+          attempt
+        }
+      };
+    } catch (error) {
+      if (attempt > retries) {
+        throw new Error(`API call failed after ${retries + 1} attempts: ${error.message}`);
+      }
+      
+      // Exponential backoff
+      await new Promise(resolve => setTimeout(resolve, delay * attempt));
+    }
+  }
 };
 
 const calculateTotal = (items) => {
@@ -223,39 +294,126 @@ const testArrayUtils = () => {
 
 testArrayUtils();
 
-// Enhanced webhook test with performance tracking
-const runWebhookTest = () => {
-  const testId = `test_${generateRandomString(6)}`;
-  const startTime = performance.now();
+// Enhanced webhook test with API simulation and comprehensive reporting
+const runWebhookTest = withPerformanceTracking(async () => {
+  const testId = `test_${generateRandomString(8)}`;
+  const testStart = new Date().toISOString();
   
-  // Simulate some processing
-  const testData = Array(1000).fill().map((_, i) => ({
-    id: i,
-    value: Math.random() * 1000,
-    timestamp: new Date().toISOString()
-  }));
+  console.log(`\n` + '='.repeat(60));
+  console.log(`🚀 WEBHOOK TEST #4 - ${testId}`.padEnd(58) + '🚀');
+  console.log('='.repeat(60));
   
-  const endTime = performance.now();
-  
-  console.log(`\n=== Webhook Test #3 ===`);
-  console.log(`Test ID: ${testId}`);
-  console.log(`Start Time: ${new Date(startTime).toISOString()}`);
-  console.log(`End Time: ${new Date(endTime).toISOString()}`);
-  console.log(`Duration: ${(endTime - startTime).toFixed(2)}ms`);
-  console.log(`Items Processed: ${testData.length}`);
-  console.log(`Test Status: COMPLETED`);
-  console.log(`Test Version: 3.0.0`);
-  
-  return {
-    testId,
-    startTime: new Date(startTime).toISOString(),
-    endTime: new Date(endTime).toISOString(),
-    duration: endTime - startTime,
-    itemsProcessed: testData.length,
-    status: 'completed',
-    version: '3.0.0'
+  // Test configuration
+  const config = {
+    testRuns: 3,
+    apiEndpoints: [
+      '/api/users',
+      '/api/products',
+      '/api/orders'
+    ],
+    concurrency: 2
   };
-};
+  
+  // Run tests
+  const results = {
+    totalTests: 0,
+    passed: 0,
+    failed: 0,
+    totalDuration: 0,
+    apiCalls: []
+  };
+  
+  // Run multiple test cases
+  for (let i = 0; i < config.testRuns; i++) {
+    const runStart = performance.now();
+    const runId = i + 1;
+    
+    console.log(`\n🔹 Test Run #${runId} - Starting...`);
+    
+    // Test each API endpoint
+    const apiPromises = config.apiEndpoints.map(async (endpoint) => {
+      try {
+        const response = await simulateApiCall(endpoint, {
+          method: 'GET',
+          retries: 1
+        });
+        
+        results.apiCalls.push({
+          endpoint,
+          status: 'success',
+          attempt: response.data.attempt,
+          timestamp: response.data.timestamp
+        });
+        
+        return { success: true, endpoint };
+      } catch (error) {
+        results.apiCalls.push({
+          endpoint,
+          status: 'failed',
+          error: error.message,
+          timestamp: new Date().toISOString()
+        });
+        
+        return { success: false, endpoint, error };
+      }
+    });
+    
+    // Process results
+    const runResults = await Promise.all(apiPromises);
+    const runDuration = (performance.now() - runStart) / 1000;
+    
+    // Update statistics
+    results.totalTests += config.apiEndpoints.length;
+    results.passed += runResults.filter(r => r.success).length;
+    results.failed += runResults.filter(r => !r.success).length;
+    results.totalDuration += runDuration;
+    
+    console.log(`   ✅ ${runResults.filter(r => r.success).length} passed`);
+    if (results.failed > 0) {
+      console.log(`   ❌ ${runResults.filter(r => !r.success).length} failed`);
+    }
+    console.log(`   ⏱️  Duration: ${runDuration.toFixed(2)}s`);
+  }
+  
+  // Calculate success rate
+  const successRate = (results.passed / results.totalTests) * 100;
+  const avgDuration = results.totalDuration / config.testRuns;
+  
+  // Generate report
+  const report = {
+    testId,
+    version: '4.0.0',
+    timestamp: testStart,
+    duration: results.totalDuration,
+    stats: {
+      totalTests: results.totalTests,
+      passed: results.passed,
+      failed: results.failed,
+      successRate: parseFloat(successRate.toFixed(2)),
+      avgDuration: parseFloat(avgDuration.toFixed(2)),
+      apiCalls: results.apiCalls
+    },
+    environment: {
+      nodeVersion: process.version,
+      platform: process.platform,
+      memory: process.memoryUsage(),
+      cpuUsage: process.cpuUsage()
+    }
+  };
+  
+  // Print summary
+  console.log('\n' + '='.repeat(60));
+  console.log('📊 TEST SUMMARY'.padEnd(58) + '📊');
+  console.log('='.repeat(60));
+  console.log(`Total Tests:  ${report.stats.totalTests}`);
+  console.log(`✅ Passed:     ${report.stats.passed}`);
+  console.log(`❌ Failed:     ${report.stats.failed}`);
+  console.log(`📈 Success:    ${report.stats.successRate}%`);
+  console.log(`⏱️  Avg. Time:  ${report.stats.avgDuration.toFixed(2)}s`);
+  console.log('='.repeat(60));
+  
+  return report;
+}, { includeStackTrace: true });
 
 // Execute the test
 const testResult = runWebhookTest();
