@@ -15,6 +15,16 @@ const formatDate = (date = new Date()) => {
   return date.toISOString().split('T')[0]; // Returns date in YYYY-MM-DD format
 };
 
+// New utility function to generate a random string
+const generateRandomString = (length = 8) => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+};
+
 const calculateTotal = (items) => {
   if (!Array.isArray(items)) {
     throw new Error('Items must be an array');
@@ -199,9 +209,14 @@ const testArrayUtils = () => {
 
 testArrayUtils();
 
+// Log the current date and a random string for webhook testing
+const randomId = generateRandomString(6);
+console.log(`Webhook test #2 - Timestamp: ${new Date().toISOString()}`);
+console.log(`Test ID: ${randomId}`);
+
 // Export for testing
 module.exports = {
   User,
-  formatName,
+  formatDate,
   calculateTotal
 };

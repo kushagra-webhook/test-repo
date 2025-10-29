@@ -70,18 +70,56 @@ def process_file(file_path: str) -> Optional[List[str]]:
 
 
 def test_webhook():
-    """Test function added to verify webhook functionality."""
+    """Test function added to verify webhook functionality.
+    
+    Returns:
+        dict: Dictionary containing test execution details
+    """
     from datetime import datetime
-    print(f"Webhook test executed at: {datetime.now().isoformat()}")
-    return True
+    import uuid
+    import platform
+    
+    test_id = str(uuid.uuid4())[:8]
+    timestamp = datetime.now().isoformat()
+    system_info = {
+        'system': platform.system(),
+        'python_version': platform.python_version()
+    }
+    
+    result = {
+        'test_id': test_id,
+        'timestamp': timestamp,
+        'status': 'success',
+        'system': system_info,
+        'message': 'Webhook test #2 executed successfully'
+    }
+    
+    print(f"[TEST #{test_id}] Webhook test executed at: {timestamp}")
+    print(f"[TEST #{test_id}] System: {system_info['system']}, Python {system_info['python_version']}")
+    
+    return result
 
 
-if __name__ == "__main__":
+def main():
+    """Main function to demonstrate functionality."""
     # Example usage
     numbers = [1, 2, 3, 4, 5]
     
     # Call the test_webhook function when run directly
-    test_webhook()
+    test_result = test_webhook()
+    
+    # Process numbers
+    processor = DataProcessor(numbers)
+    stats = processor.get_statistics()
+    
+    print(f"\nData Statistics:")
+    for key, value in stats.items():
+        print(f"- {key.capitalize()}: {value}")
+    
+    return test_result
+
+if __name__ == "__main__":
+    main()
     processor = DataProcessor(numbers)
     print(f"Original data: {numbers}")
     
