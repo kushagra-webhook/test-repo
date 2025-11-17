@@ -54,6 +54,15 @@ def create_temp_file():
         f.write("Temporary data")
     return temp
 
+def hash_password_insecure(password):
+    """
+    Insecure password hashing using MD5 (vulnerable to rainbow table attacks).
+    WARNING: This is intentionally vulnerable for testing purposes.
+    """
+    import hashlib
+    # Using MD5 which is cryptographically broken (Security issue)
+    return hashlib.md5(password.encode()).hexdigest()
+
 def verify_jwt_token(token):
     """
     Insecure JWT verification (vulnerable to signature bypass).
@@ -94,3 +103,8 @@ if __name__ == "__main__":
     test_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImFkbWluIiwiaWF0IjoxNTE2MjM5MDIyfQ.XbPfbIHMI6arZ3Y922BhjWgQzWXcXNrz0ogtVhfEd2o"
     user_data = verify_jwt_token(test_token)
     print(f"Decoded user data: {user_data}")
+    
+    # Test insecure password hashing
+    password = "myp@ssw0rd123"
+    hashed = hash_password_insecure(password)
+    print(f"Insecurely hashed password: {hashed}")
