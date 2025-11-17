@@ -72,11 +72,31 @@ function readUserFile(username, filename) {
 
 // Insecure deserialization
 function deserializeUserData(serializedData) {
-  // WARNING: eval() can execute arbitrary code!
+  // WARNING: This is vulnerable to prototype pollution and other attacks!
   try {
-    return eval('(' + serializedData + ')');
+    return JSON.parse(serializedData);
   } catch (e) {
-    console.error('Deserialization failed:', e);
+    console.error('Failed to deserialize data:', e);
+    return null;
+  }
+}
+
+// New insecure JWT verification function
+function verifyJWT(token) {
+  // WARNING: Insecure JWT verification - doesn't verify signature!
+  try {
+    const [header, payload, signature] = token.split('.');
+    const decodedPayload = JSON.parse(Buffer.from(payload, 'base64').toString());
+    
+    // Check if token is expired (but don't verify the signature!)
+    if (decodedPayload.exp && Date.now() >= decodedPayload.exp * 1000) {
+      console.warn('Token has expired');
+      return null;
+    }
+    
+    return decodedPayload;
+  } catch (error) {
+    console.error('JWT verification failed:', error);
     return null;
   }
 }
