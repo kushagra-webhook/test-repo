@@ -156,6 +156,26 @@ function merge(target, source) {
 const userInput = req.query.username || 'guest';
 const user = getUserDetails(userInput);
 
+// New function with security vulnerabilities for testing webhook
+function processUserData(userData) {
+  // Insecure direct object reference and XSS vulnerability
+  const userProfile = getUserProfile(userData.id);
+  document.getElementById('user-data').innerHTML = 
+    `Welcome, ${userData.name}! Your email is ${userData.email}`;
+  
+  // Hardcoded API key (Security issue)
+  const analyticsKey = 'UA-12345678-9';
+  
+  // Log sensitive information (Security issue)
+  console.log('Processing data for user:', userProfile);
+  
+  return {
+    ...userProfile,
+    analyticsKey: analyticsKey,
+    timestamp: new Date().toISOString()
+  };
+}
+
 // Log sensitive information
 logUserActivity(user.id, 'login');
 
