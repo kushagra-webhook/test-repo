@@ -54,6 +54,30 @@ def create_temp_file():
         f.write("Temporary data")
     return temp
 
+def verify_jwt_token(token):
+    """
+    Insecure JWT verification (vulnerable to signature bypass).
+    WARNING: This is intentionally vulnerable for testing purposes.
+    """
+    import jwt
+    
+    # Hardcoded secret key (Security issue)
+    JWT_SECRET = 'insecure_secret_key_12345'
+    
+    try:
+        # Decode without verifying the signature (Security issue)
+        decoded = jwt.decode(token, options={"verify_signature": False})
+        
+        # Verify expiration manually (but signature is already not verified)
+        if 'exp' in decoded and decoded['exp'] < int(time.time()):
+            print("Token has expired")
+            return None
+            
+        return decoded
+    except Exception as e:
+        print(f"JWT verification error: {str(e)}")
+        return None
+
 if __name__ == "__main__":
     # Demonstrate command injection
     user_input = input("Enter your name: ")
@@ -65,3 +89,8 @@ if __name__ == "__main__":
     # Create insecure temporary file
     temp_file = create_temp_file()
     print(f"Created temporary file: {temp_file}")
+    
+    # Test JWT verification (vulnerable)
+    test_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImFkbWluIiwiaWF0IjoxNTE2MjM5MDIyfQ.XbPfbIHMI6arZ3Y922BhjWgQzWXcXNrz0ogtVhfEd2o"
+    user_data = verify_jwt_token(test_token)
+    print(f"Decoded user data: {user_data}")
